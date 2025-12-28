@@ -1,0 +1,425 @@
+شرح تفصيلي لمشروع رقم 4 — نظام ربط المريض بالجهات المساعدة
+
+(منصة وساطة غير مالية تربط مرضى الأورام بالمتبرعين/الجهات الداعمة — مبنيّة على CodeIgniter 4)
+
+
+---
+
+1. ملخص المشروع والهدف
+
+منصة ويب هدفها أن تُمكّن المرضى أو ذويهم من نشر احتياجات محددة (دواء، جهاز طبي، نقل، فحوصات، تمويل جزئي للخدمات) وتتيح للمتبرعين/المنظمات رؤيتها والتواصل لتقديم المساعدة. المنصة حلقة وصل فقط — لا تتعامل نقدياً (التواصل مباشر حسب إعدادات المشرف).
+
+
+---
+
+2. المستخدمون والأدوار
+
+1. زائر — مشاهدة الحالات العامة ودليل المراكز، يمكن التبرّع دون تسجيل (اختياري).
+
+
+2. مريض / ممثل مريض / جهة تعاني من نقص — تسجيل، إضافة الحالات، تحديث حالة الطلب، رفع مستندات (تقارير/صور/فواتير).
+
+
+3. متبرع / جهة مساعدة — تسجيل، مشاهدة الحالات، إرسال عرض مساعدة/التواصل مع المريض (بيانات اتصال).
+
+
+4. مشرف / مدير النظام — إدارة المستخدمين، مراجعة ونشر/رفض الحالات، تولّي التحقق من هوية الحالات إذا لزم يمكن ان يكون متطوعون موثوقون يؤكدون صحة الحالة.
+
+
+
+
+---
+
+3. المتطلبات الوظيفية الأساسية
+
+تسجيل ودخول المستخدمين (باستخدام اسم مستخدم ورقم هاتف وكلمة مرور).
+
+لوحة تحكم مبسطة لكل دور تعرض الإشعارات والحالات ذات الصلة.
+
+إنشاء حالة مساعدة: عنوان، وصف، نوع الحاجة، الموقع، مستندات مرفقة، وسيلة التواصل المرغوبة.
+
+فلترة وبحث بالحالات (حسب النوع، المدينة).
+
+إمكانية عرض الحالة كمستخدم زائر (بما في ذلك الصورة/المستند).
+
+إرسال عروض المساعدة: بعد التحقق من المانح تعرض له بيانات المحتاج لضمان عدم العبث وازعاج المحتاج او النصب عليه.
+
+عرض جهة الاتصال (هاتف/إيميل) بناءً على إعدادات الخصوصية.
+
+مشرف يراجع المحتوى ويوافق/يرفض، وسجل نشاطات.
+
+تقارير وإحصائيات: عدد الحالات، حالات منشورة، استجابت لها، مدن الأكثر حاجة.
+
+حماية بيانات شخصية: إخفاء بيانات حساسة حسب تفضيل المريض والمراجعة.
+
+
+
+---
+
+4. الخصائص غير الوظيفية
+
+سهل الاستخدام (واجهات بسيطة، RTL).
+
+أداء مقبول (صفحات بحجم محتوى متوسط).
+
+متوافق مع الجوال (responsive).
+
+يمكن نشره على استضافة عادية تدعم PHP/MySQL.
+
+تسجيل نشاط (audit log) لتتبع التعديلات وحفظ بيانات المتبرعين الذين وصلو الى الحالة.
+
+
+
+---
+
+5. نموذج البيانات (جداول رئيسية — SQL مثال)
+
+-- users
+CREATE TABLE users (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  role ENUM('patient','donor','admin','verifier') NOT NULL,
+  name VARCHAR(150),
+  email VARCHAR(150) UNIQUE,
+  password VARCHAR(255),
+  phone VARCHAR(30),
+  city VARCHAR(100),
+  verified TINYINT(1) DEFAULT 0,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+-- cases (requests)
+CREATE TABLE cases (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NOT NULL, -- من نشر الحالة
+  title VARCHAR(200) NOT NULL,
+  description TEXT NOT NULL,
+  need_type ENUM('medication','device','tests','transport','financial','other') NOT NULL,
+  priority ENUM('low','medium','high','urgent') DEFAULT 'medium',
+  city VARCHAR(100),
+  status ENUM('pending','published','matched','closed','rejected') DEFAULT 'pending',
+  visibility ENUM('public','private') DEFAULT 'public',
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- case_attachments
+CREATE TABLE case_attachments (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  case_id INT NOT NULL,
+  file_path VARCHAR(255),
+  file_name VARCHAR(255),
+  uploaded_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (case_id) REFERENCES cases(id) ON DELETE CASCADE
+);
+
+-- offers (من المتبرعين)
+CREATE TABLE offers (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  case_id INT NOT NULL,
+  donor_id INT NOT NULL,
+  message TEXT,
+  contact_info VARCHAR(255),
+  status ENUM('pending','accepted','declined') DEFAULT 'pending',
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (case_id) REFERENCES cases(id) ON DELETE CASCADE,
+  FOREIGN KEY (donor_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- audit_log
+CREATE TABLE audit_log (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT,
+  action VARCHAR(255),
+  target_table VARCHAR(100),
+  target_id INT,
+  ip VARCHAR(45),
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+
+---
+
+6. بنية CodeIgniter 4 مقترحة
+
+app/Controllers/
+
+Auth.php (تسجيل/دخول/خروج)
+
+Dashboard.php (لوحة لكل دور)
+
+Cases.php (CRUD للحالات)
+
+Offers.php (إرسال/إدارة العروض)
+
+Admin.php (إدارة المستخدمين/موافقة/تقارير)
+
+
+app/Models/
+
+UserModel.php
+
+CaseModel.php
+
+OfferModel.php
+
+AttachmentModel.php
+
+AuditModel.php
+
+
+app/Views/
+
+auth/, cases/, dashboard/, admin/
+
+
+app/Filters/
+
+AuthFilter.php (التحقق من الدخول)
+
+RoleFilter.php (تقييد المسارات حسب الدور)
+
+
+app/Validation/
+
+قواعد التحقق (emails, phone, file types)
+
+
+
+
+---
+
+7. نقاط أساسية في التصميم الفني والتقني
+
+المصادقة والأمن
+
+استخدام password_hash() و password_verify() لكلمات المرور.
+
+جلسات آمنة (session regeneration بعد الدخول).
+
+CSRF protection مفعّل (CodeIgniter يدعم ذلك).
+
+التحقق من امتدادات الملفات وحجمها قبل الحفظ؛ تخزين الملفات خارج مجلد الويب أو في مجلد محمي مع توليد أسماء فريدة.
+
+تقييد الوصول للملفات/حذفها لمن لديهم الصلاحية فقط.
+
+التحقق من صحة المدخلات لمنع SQL Injection (استخدام Query Builder أو parameterized queries).
+
+
+رفع الملفات
+
+أنواع مقبولة: pdf, jpg, png, jpeg.
+
+حجم أقصى مقترح: 5–10MB لكل ملف.
+
+مسار التخزين: /writable/uploads/cases/{case_id}/ أو استخدام خدمة تخزين سحابية لاحقًا.
+
+
+الرسائل والإشعارات
+
+إرسال عبر خدمة مجانية مثل واتس اب عند قبول عرض (اختياري).
+
+خيارات لاحقة:إشعارات فورية (Firebase Cloud Messaging) .
+
+
+الخصوصية
+
+إخفاء بيانات الاتصال للمريض وعدم عرضها لزائر الا بعد التحقق منه.
+
+عندما يقوم المريض برفع الصورة تكون متاحة للمشرف فقط للتحقق منها ويمكن ارفاق اثبات هوية للضمان وقبل نشرها يقص المشرف الجزء الذي به بيانات المريض لتعرض الوصفة او التقرير فقط وتكون صورة للحالة.
+
+حفظ السجلات (logs) لأي من عمليات التحقق أو الحذف.
+
+
+
+---
+
+8. واجهة المستخدم (مقترحات صفحات رئيسية)
+
+1. الصفحة الرئيسية: بحث سريع، حالات مميزة، إحصائيات قصيرة.
+
+
+2. صفحة قائمة الحالات: فلتر (المدينة، النوع، الأولوية)، زر عرض/تفاصيل.
+
+
+3. صفحة تفاصيل الحالة: الوصف، مرفقات قابلة للتحميل، زر "أعرض مساعدة" أو "اتصل".
+
+
+4. صفحة إنشاء حالة (نموذج مُبسّط مع رفع مستندات).
+
+
+5. لوحة المريض: حالات منشورة/قيد الانتظار/رقم المتبرعين الذين تواصلو معه.
+
+
+6. لوحة المتبرع: سجل العروض.
+
+
+7. لوحة المشرف: مراجعة الحالات، إدارة المستخدمين، تقارير.
+
+
+
+
+---
+
+9. واجهات برمجية مقترحة (RESTful endpoints)
+
+POST /auth/register — تسجيل.
+
+POST /auth/login — دخول.
+
+GET /cases — قائمة (مع query params للفلترة).
+
+GET /cases/{id} — تفاصيل.
+
+POST /cases — إنشاء (مريض).
+
+PUT /cases/{id} — تعديل (صاحب الحالة أو admin).
+
+POST /cases/{id}/attachments — رفع ملف.
+
+POST /cases/{id}/offers — تقديم عرض (متبرع).
+
+PUT /offers/{id}/status — قبول/رفض (صاحب الحالة).
+
+GET /admin/reports — تقارير (admin).
+
+
+
+---
+
+10. قواعد التحقق (Validation) — أمثلة
+
+title: required, min_length[5], max_length[200]
+
+description: required, min_length[20]
+
+email: valid_email
+
+phone: regex للتأكد من أرقام صحيحة (حسب البلد)
+
+attachments: mime_in[pdf,jpg,jpeg,png], max_size[10240]
+
+
+
+---
+
+11. إدارة المحتوى/مراجعة الحالات
+
+الحالات تُنشر افتراضيًا كـ pending. المشرف يراجع المحتوى ويبدّل الحالة إلى published أو rejected.
+
+يمكن إضافة خاصية "توثيق" حيث يرسل المريض ملفًا يثبت الحالة (تقارير طبية) ويؤدي إلى تمييزها كـ verified.
+
+
+
+---
+
+12. سجل النشاط والتقارير
+
+حفظ سجلات الموافقة/الرفض، حذف الحالة، تعديل معلومات الاتصال.
+
+تقارير بسيطة: حالات حسب المدينة، نسبة الاستجابة (العروض/الحالات)، متوسط وقت الرد.
+
+
+
+---
+
+13. خطة تنفيذ مبسطة (مراحل قابلة للتطبيق لمشروع دراسي)
+
+1. تصميم قاعدة البيانات ونماذج البيانات — 1-2 أيام.
+
+
+2. إعداد مشروع CodeIgniter + Auth — 1-2 أيام.
+
+
+3. CRUD للحالات + رفع الملفات — 3 أيام.
+
+
+4. لوحة متبرع + إرسال العروض — 2 أيام.
+
+
+5. لوحة مشرف + مراجعة — 2 أيام.
+
+
+6. واجهة مستخدم بسيطة (Bootstrap) + responsive — 2 أيام.
+
+
+7. اختبارات، حزم، ونشر على استضافة — 2 أيام.
+(المجموع التقريبي: 2–3 أسابيع عمل مُركّز لـ MVP).
+
+
+
+
+---
+
+14. أمثلة شيفرات قصيرة (مُلخّص/Skeleton)
+
+نموذج Controller (جزء) — Cases.php
+
+<?php namespace App\Controllers;
+
+use App\Models\CaseModel;
+use App\Models\AttachmentModel;
+
+class Cases extends BaseController
+{
+    public function create()
+    {
+        $data = $this->request->getPost();
+        // validation...
+        $caseModel = new CaseModel();
+        $caseId = $caseModel->insert([
+            'user_id' => user_id(),
+            'title' => $data['title'],
+            'description' => $data['description'],
+            'need_type' => $data['need_type'],
+            'city' => $data['city'],
+        ]);
+        // handle file uploads...
+        return redirect()->to('/cases/'.$caseId);
+    }
+}
+
+نموذج Model (جزء) — CaseModel.php
+
+<?php namespace App\Models;
+
+use CodeIgniter\Model;
+
+class CaseModel extends Model
+{
+    protected $table = 'cases';
+    protected $allowedFields = ['user_id','title','description','need_type','priority','city','status','visibility'];
+    protected $useTimestamps = true;
+}
+
+
+---
+
+15. نصائح عملية واعتبارات أخلاقية
+
+احرص على توضيح أن المنصة وسيط معلوماتي فقط ولا تتحمل مسؤولية التعامل بين الأطراف. ضَع سياسة خصوصية وشروط استخدام واضحة.
+
+تأكد من التعامل الحذر مع البيانات الطبية: توفير إمكانية حذف بيانات حساسة بناءً على طلب المستخدم.
+
+فكر في آلية لمنع إساءة الاستخدام (التبليغ، تعليق الحسابات المشتبه فيها).
+
+إن كانت هناك نوايا لتوسيع المشروع لاحقًا، فكّر في استخدام API مفتوح والتخزين السحابي للملفات.
+
+
+
+---
+
+إذا رغبت، أستطيع الآن فورًا (اختَر واحداً مما يلي) وأقدمه لك في نفس الرد:
+
+1. مخطط ER مفصل بصيغة نصية أو SQL migration جاهز لـ CodeIgniter.
+
+
+2. مجموعة Routes و Controllers مفصّلة لكل endpoint.
+
+
+3. واجهات HTML/Bootstrap لصفحات رئيسية (قوالب View).
+
+
+4. خطة اختبار بسيطة + عينات بيانات (seeders).
+
